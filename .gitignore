@@ -12,18 +12,16 @@ env/
 dist/
 build/
 
-# Environment variables
-.env
-.env.local
-
-# Data files (local storage)
-data/
-
 # Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -35,6 +33,9 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Data files (generated, don't commit)
+data/
 
 # Logs
 *.log
