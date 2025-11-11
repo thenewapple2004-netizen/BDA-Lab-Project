@@ -1,199 +1,376 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import WeatherCard from './components/WeatherCard';
-import TemperatureChart from './components/TemperatureChart';
-import HumidityPressureChart from './components/HumidityPressureChart';
-import StatisticsCard from './components/StatisticsCard';
 import './index.css';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5000';
 
 function App() {
-  const [currentWeather, setCurrentWeather] = useState(null);
-  const [selectedCity, setSelectedCity] = useState('London');
-  const [cities, setCities] = useState(['London']);
-  const [temperatureData, setTemperatureData] = useState([]);
-  const [humidityPressureData, setHumidityPressureData] = useState([]);
-  const [statistics, setStatistics] = useState(null);
+  const [tab, setTab] = useState('home');
+  const [city, setCity] = useState('London');
+  const [currentRecord, setCurrentRecord] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [forecast, setForecast] = useState(null);
+  const [forecastDays, setForecastDays] = useState(7);
+  const [history, setHistory] = useState([]);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const [storageType, setStorageType] = useState('unknown');
 
-  // Fetch available cities
   useEffect(() => {
-    fetchCities();
+    const loadHealth = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/health`);
+        setStorageType(res.data.storage);
+      } catch {
+        setStorageType('unavailable');
+      }
+    };
+    loadHealth();
   }, []);
 
-  // Fetch weather data when city changes
-  useEffect(() => {
-    if (selectedCity) {
-      fetchCurrentWeather();
-      fetchTemperatureTrends();
-      fetchHumidityPressure();
-      fetchStatistics();
-    }
-  }, [selectedCity]);
+  const setStatus = (msg, err = null) => {
+    setMessage(msg);
+    setError(err);
+  };
 
-  const fetchCities = async () => {
+  const fetchWeather = async (mode, extraParams = {}) => {
+    if (!city.trim()) {
+      setStatus(null, 'Please enter a city name.');
+      return;
+    }
+
+    setLoading(true);
+    setStatus(null, null);
+
     try {
-      const response = await axios.get(`${API_BASE_URL}/weather/cities`);
-      if (response.data.length > 0) {
-        setCities(response.data);
+      const res = await axios.get(`${API_BASE}/weather`, {
+        params: { city, mode, ...extraParams },
+      });
+
+      if (mode === 'current') {
+        setCurrentRecord(res.data.record);
+        setStatus('Current weather stored successfully.');
+      } else {
+        setCurrentRecord(null);
+        setStatus(
+          `${res.data.stored} records stored for ${mode === 'past' ? 'past days' : 'historical range'}.`,
+        );
       }
-    } catch (error) {
-      console.error('Error fetching cities:', error);
-    }
-  };
-
-  const fetchCurrentWeather = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/weather/current`, {
-        params: { city: selectedCity }
-      });
-      setCurrentWeather(response.data);
-    } catch (error) {
-      setError('Failed to fetch current weather data');
-      console.error('Error fetching current weather:', error);
+    } catch (err) {
+      setStatus(null, err.response?.data?.detail || 'Failed to fetch weather data.');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchTemperatureTrends = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/analytics/temperature-trends`, {
-        params: { city: selectedCity, days: 7 }
-      });
-      setTemperatureData(response.data);
-    } catch (error) {
-      console.error('Error fetching temperature trends:', error);
-    }
-  };
-
-  const fetchHumidityPressure = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/analytics/humidity-pressure`, {
-        params: { city: selectedCity, days: 7 }
-      });
-      setHumidityPressureData(response.data);
-    } catch (error) {
-      console.error('Error fetching humidity pressure data:', error);
-    }
-  };
-
-  const fetchStatistics = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/analytics/statistics`, {
-        params: { city: selectedCity, days: 7 }
-      });
-      setStatistics(response.data);
-    } catch (error) {
-      console.error('Error fetching statistics:', error);
-    }
-  };
-
-  const collectBulkData = async () => {
+  const loadStats = async () => {
     setLoading(true);
-    setError(null);
-    setSuccess(null);
-    
+    setStatus(null, null);
     try {
-      const response = await axios.post(`${API_BASE_URL}/weather/bulk-collect`, {
-        cities: ['London', 'New York', 'Tokyo', 'Paris', 'Sydney', 'Berlin', 'Moscow', 'Cairo', 'Mumbai', 'Beijing']
+      const res = await axios.get(`${API_BASE}/stats`, {
+        params: { city: city || null, days: 7 },
       });
-      
-      setSuccess(response.data.message);
-      // Refresh cities list
-      fetchCities();
-    } catch (error) {
-      setError('Failed to collect bulk weather data');
-      console.error('Error collecting bulk data:', error);
+      setStats(res.data);
+      setStatus('Statistics refreshed.');
+    } catch (err) {
+      setStatus(null, err.response?.data?.detail || 'Failed to load statistics.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCityChange = (e) => {
-    setSelectedCity(e.target.value);
+  const loadForecast = async () => {
+    setLoading(true);
+    setStatus(null, null);
+    try {
+      const res = await axios.get(`${API_BASE}/forecast`, {
+        params: { city: city || null, days: forecastDays },
+      });
+      setForecast(res.data);
+      setStatus(`Forecast generated for ${forecastDays} days.`);
+    } catch (err) {
+      setStatus(null, err.response?.data?.detail || 'Failed to generate forecast.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    setLoading(true);
+    setStatus(null, null);
+    try {
+      const res = await axios.get(`${API_BASE}/history`, {
+        params: { city: city || null, days: 30 },
+      });
+      setHistory(res.data.records || []);
+      setStatus(`Loaded ${res.data.count} records from storage.`);
+    } catch (err) {
+      setStatus(null, err.response?.data?.detail || 'Failed to load history.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleHistoricalFetch = () => {
+    if (!startDate || !endDate) {
+      setStatus(null, 'Please select both start and end dates.');
+      return;
+    }
+    fetchWeather('historical', { start: startDate, end: endDate });
   };
 
   return (
     <div className="container">
-      <div className="header">
-        <h1><i className="fas fa-cloud-sun"></i> Weather Analytics Dashboard</h1>
-        <p>Real-time weather data analysis and visualization</p>
-      </div>
+      <header className="header">
+        <h1>Weather Data Analytics</h1>
+        <p>Powered by Open-Meteo • Stored in HDFS/Local</p>
+        <div className="storage-indicator">
+          Storage backend: <strong>{storageType}</strong>
+        </div>
+      </header>
+
+      <nav className="nav">
+        {['home', 'dashboard', 'history'].map((key) => (
+          <button
+            key={key}
+            className={tab === key ? 'nav-btn active' : 'nav-btn'}
+            onClick={() => setTab(key)}
+          >
+            {key.charAt(0).toUpperCase() + key.slice(1)}
+          </button>
+        ))}
+      </nav>
 
       {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
+      {message && <div className="success">{message}</div>}
 
-      <div className="controls">
-        <div className="select-wrapper">
-          <select value={selectedCity} onChange={handleCityChange} disabled={loading}>
-            {cities.map(city => (
-              <option key={city} value={city}>
-                {city.charAt(0).toUpperCase() + city.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button 
-          className="btn" 
-          onClick={fetchCurrentWeather} 
-          disabled={loading}
-        >
-          <i className="fas fa-sync-alt"></i> Refresh Weather
-        </button>
-        <button 
-          className="btn" 
-          onClick={collectBulkData} 
-          disabled={loading}
-        >
-          <i className="fas fa-download"></i> Collect Bulk Data
-        </button>
-      </div>
+      {tab === 'home' && (
+        <section className="card">
+          <h2>Fetch & Store Weather</h2>
+          <div className="form-group">
+            <label>City Name</label>
+            <input
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="e.g., Lahore, London"
+              disabled={loading}
+            />
+          </div>
 
-      {loading && (
-        <div className="loading">
-          <i className="fas fa-spinner"></i>
-          <span style={{ marginLeft: '10px' }}>Loading...</span>
-        </div>
+          <div className="actions">
+            <button
+              className="btn"
+              onClick={() => fetchWeather('current')}
+              disabled={loading}
+            >
+              Current Weather
+            </button>
+            <button
+              className="btn"
+              onClick={() => fetchWeather('past', { days: 10 })}
+              disabled={loading}
+            >
+              Past 10 Days (Hourly)
+            </button>
+          </div>
+
+          <div className="form-inline">
+            <div>
+              <label>Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <div>
+              <label>End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+            <button className="btn" onClick={handleHistoricalFetch} disabled={loading}>
+              Historical Range
+            </button>
+          </div>
+
+          {currentRecord && (
+            <div className="record-preview">
+              <h3>Latest Record</h3>
+              <p><strong>City:</strong> {currentRecord.city}</p>
+              <p><strong>Temperature:</strong> {currentRecord.tempC ?? 'N/A'} °C</p>
+              <p><strong>Humidity:</strong> {currentRecord.humidity ?? 'N/A'} %</p>
+              <p><strong>Wind Speed:</strong> {currentRecord.windKph ?? 'N/A'} km/h</p>
+              <p><strong>Conditions:</strong> {currentRecord.conditions}</p>
+              <p><strong>Timestamp:</strong> {new Date(currentRecord.timestamp).toLocaleString()}</p>
+            </div>
+          )}
+        </section>
       )}
 
-      {currentWeather && !loading && (
-        <div className="dashboard">
-          <WeatherCard weather={currentWeather} />
-          {statistics && <StatisticsCard statistics={statistics} />}
-        </div>
+      {tab === 'dashboard' && (
+        <section className="card">
+          <h2>Statistics</h2>
+          <div className="form-group">
+            <label>Filter by City (optional)</label>
+            <input
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Leave empty for all data"
+              disabled={loading}
+            />
+          </div>
+          <button className="btn" onClick={loadStats} disabled={loading}>
+            Load Stats (Last 7 Days)
+          </button>
+          <div className="form-inline" style={{ marginTop: '15px' }}>
+            <div className="form-group">
+              <label>Forecast Days (2-7)</label>
+              <select
+                value={forecastDays}
+                onChange={(e) => setForecastDays(Number(e.target.value))}
+                disabled={loading}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd' }}
+              >
+                {[2, 3, 4, 5, 6, 7].map((d) => (
+                  <option key={d} value={d}>
+                    {d} {d === 1 ? 'day' : 'days'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button className="btn secondary" onClick={loadForecast} disabled={loading}>
+              Generate {forecastDays}-Day Forecast
+            </button>
+          </div>
+
+          {stats && (
+            <div className="stats-grid">
+              <StatCard label="Records" value={stats.record_count} />
+              <StatCard label="Avg Temp (°C)" value={formatValue(stats.avg_tempC)} />
+              <StatCard label="Min Temp (°C)" value={formatValue(stats.min_tempC)} />
+              <StatCard label="Max Temp (°C)" value={formatValue(stats.max_tempC)} />
+              <StatCard label="Avg Humidity (%)" value={formatValue(stats.avg_humidity)} />
+              <StatCard label="Avg Wind (km/h)" value={formatValue(stats.avg_windKph)} />
+            </div>
+          )}
+
+          {stats && stats.record_count === 0 && (
+            <div className="empty-state">No records found for this period.</div>
+          )}
+
+          {forecast && (
+            <div className="forecast-container">
+              <h3>Forecast ({forecast.forecast_days} days)</h3>
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Temp (°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Wind (km/h)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {forecast.data.map((entry) => (
+                    <tr key={entry.date}>
+                      <td>{entry.date}</td>
+                      <td>{formatValue(entry.tempC)}</td>
+                      <td>{formatValue(entry.humidity)}</td>
+                      <td>{formatValue(entry.windKph)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="generated-at">
+                Generated: {new Date(forecast.generated_at).toLocaleString()}
+              </div>
+            </div>
+          )}
+        </section>
       )}
 
-      <div className="chart-container">
-        <h3><i className="fas fa-chart-line"></i> Temperature Trends (7 Days)</h3>
-        {temperatureData.length > 0 ? (
-          <TemperatureChart data={temperatureData} />
-        ) : (
-          <div className="loading">
-            <i className="fas fa-chart-line"></i>
-            <span style={{ marginLeft: '10px' }}>No temperature data available</span>
+      {tab === 'history' && (
+        <section className="card">
+          <h2>Stored Records</h2>
+          <div className="form-group">
+            <label>Filter by City (optional)</label>
+            <input
+              type="text"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Leave empty for all data"
+              disabled={loading}
+            />
           </div>
-        )}
-      </div>
+          <button className="btn" onClick={loadHistory} disabled={loading}>
+            Load 30-Day History
+          </button>
 
-      <div className="chart-container">
-        <h3><i className="fas fa-chart-area"></i> Humidity & Pressure Trends (7 Days)</h3>
-        {humidityPressureData.length > 0 ? (
-          <HumidityPressureChart data={humidityPressureData} />
-        ) : (
-          <div className="loading">
-            <i className="fas fa-chart-area"></i>
-            <span style={{ marginLeft: '10px' }}>No humidity/pressure data available</span>
-          </div>
-        )}
-      </div>
+          {loading && <div className="loading">Loading...</div>}
+
+          {!loading && history.length > 0 && (
+            <div className="table-container">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>City</th>
+                    <th>Timestamp</th>
+                    <th>Temp (°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Wind (km/h)</th>
+                    <th>Conditions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((record, idx) => (
+                    <tr key={`${record.timestamp}-${idx}`}>
+                      <td>{record.city}</td>
+                      <td>{new Date(record.timestamp).toLocaleString()}</td>
+                      <td>{formatValue(record.tempC)}</td>
+                      <td>{formatValue(record.humidity)}</td>
+                      <td>{formatValue(record.windKph)}</td>
+                      <td>{record.conditions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!loading && history.length === 0 && (
+            <div className="empty-state">No stored records yet. Fetch some weather data first.</div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
+
+const StatCard = ({ label, value }) => (
+  <div className="stat-card">
+    <div className="stat-label">{label}</div>
+    <div className="stat-value">{value}</div>
+  </div>
+);
+
+const formatValue = (value) => {
+  if (value === null || value === undefined) {
+    return 'N/A';
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value : value.toFixed(1);
+  }
+  return value;
+};
 
 export default App;
