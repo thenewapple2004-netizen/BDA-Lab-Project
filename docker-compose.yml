@@ -1,0 +1,72 @@
+# Weather Analytics Dashboard - Docker Compose
+# Architecture: Hadoop (HDFS) + Backend (FastAPI) with automatic data processing
+
+services:
+  # Hadoop NameNode
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-namenode
+    hostname: namenode
+    ports:
+      - "9870:9870"   # NameNode Web UI
+      - "9000:9000"   # NameNode RPC
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/data  # Mount local data directory
+    environment:
+      - CLUSTER_NAME=test
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-network
+
+  # Hadoop DataNode
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: hadoop-datanode
+    hostname: datanode
+    ports:
+      - "9864:9864"   # DataNode Web UI
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+      - ./data:/data  # Mount local data directory
+    depends_on:
+      - namenode
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-network
+
+  # Backend Service - FastAPI (processes data on startup)
+  backend:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: weather-backend
+    hostname: backend
+    ports:
+      - "5000:5000"   # Backend API + Frontend
+    volumes:
+      - ./data:/app/data  # Mount data directory for reading/writing
+    environment:
+      - DATA_DIR=/app/data
+    depends_on:
+      - namenode
+      - datanode
+    networks:
+      - bigdata-network
+    command: >
+      sh -c "
+        echo 'Waiting for Hadoop to initialize...' &&
+        sleep 20 &&
+        echo 'Starting backend server (data processing happens on startup)...' &&
+        python /app/main.py
+      "
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+
+networks:
+  bigdata-network:
+    driver: bridge
