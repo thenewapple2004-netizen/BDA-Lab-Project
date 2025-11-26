@@ -265,13 +265,13 @@ def get_storage_adapter() -> StorageAdapter:
             client = HdfsClient(namenode, user=hdfs_user, root=hdfs_base)
             # Test connection
             client.status(".", strict=False)
-            print(f"✓ Using HDFS storage: {namenode}{hdfs_base}")
+            print(f"[OK] Using HDFS storage: {namenode}{hdfs_base}")
             return HDFSAdapter(namenode, hdfs_user, hdfs_base)
         except Exception as e:
-            print(f"⚠ HDFS unavailable ({e}), falling back to local storage")
+            print(f"[WARN] HDFS unavailable ({e}), falling back to local storage")
     
     # Fallback to local
     local_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-    print(f"✓ Using local storage: {local_dir}")
+    print(f"[OK] Using local storage: {local_dir}")
     return LocalAdapter(local_dir)
 

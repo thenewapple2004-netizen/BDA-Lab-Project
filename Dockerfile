@@ -26,13 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy main.py (all backend code in one file)
-COPY backend/main.py .
+COPY main.py .
 
 # Copy built React app from frontend-builder
 COPY --from=frontend-builder /app/frontend/build ./frontend
