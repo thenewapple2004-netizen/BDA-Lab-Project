@@ -56,7 +56,7 @@ def _filter_by_range(
 ) -> List[Dict[str, Any]]:
     """Filter records by optional inclusive start/end dates (YYYY-MM-DD)."""
     if not start_date and not end_date:
-        return records
+    return records
 
     start_dt = datetime.fromisoformat(start_date) if start_date else None
     end_dt = datetime.fromisoformat(end_date) + timedelta(days=1) if end_date else None

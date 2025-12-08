@@ -196,7 +196,7 @@ function App() {
       {error && <div className="error">{error}</div>}
       {message && <div className="success">{message}</div>}
 
-      <section className="card">
+        <section className="card">
         <h2>Filters & Actions</h2>
         <div className="controls">
           <div className="select-wrapper">
@@ -219,7 +219,7 @@ function App() {
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
           </div>
-        </div>
+            </div>
 
         <div className="actions">
           <button className="btn" onClick={refreshData} disabled={loading}>
@@ -233,18 +233,18 @@ function App() {
         <div className="form-inline">
           <div>
             <label>Forecast days (2-7)</label>
-            <select
-              value={forecastDays}
-              onChange={(e) => setForecastDays(Number(e.target.value))}
-              disabled={loading}
-            >
-              {[2, 3, 4, 5, 6, 7].map((d) => (
-                <option key={d} value={d}>
+              <select
+                value={forecastDays}
+                onChange={(e) => setForecastDays(Number(e.target.value))}
+                disabled={loading}
+              >
+                {[2, 3, 4, 5, 6, 7].map((d) => (
+                  <option key={d} value={d}>
                   {d} days
-                </option>
-              ))}
-            </select>
-          </div>
+                  </option>
+                ))}
+              </select>
+            </div>
           <div>
             <label>Lookback days</label>
             <input
@@ -273,7 +273,7 @@ function App() {
           ) : (
             <div className="empty-state">No latest record for this filter.</div>
           )}
-        </div>
+          </div>
 
         <div className="card">
           <h3>Summary</h3>
@@ -307,72 +307,72 @@ function App() {
       <section className="card">
         <h2>Forecast</h2>
         {forecast && forecast.data?.length ? (
-          <div className="forecast-container">
+            <div className="forecast-container">
             <h3>{forecast.city} • next {forecast.forecast_days} days</h3>
-            <table className="history-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Temp (°C)</th>
-                  <th>Humidity (%)</th>
-                  <th>Wind (km/h)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {forecast.data.map((entry) => (
-                  <tr key={entry.date}>
-                    <td>{entry.date}</td>
-                    <td>{formatValue(entry.tempC)}</td>
-                    <td>{formatValue(entry.humidity)}</td>
-                    <td>{formatValue(entry.windKph)}</td>
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Temp (°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Wind (km/h)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="generated-at">
+                </thead>
+                <tbody>
+                  {forecast.data.map((entry) => (
+                    <tr key={entry.date}>
+                      <td>{entry.date}</td>
+                      <td>{formatValue(entry.tempC)}</td>
+                      <td>{formatValue(entry.humidity)}</td>
+                      <td>{formatValue(entry.windKph)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="generated-at">
               Generated: {new Date(forecast.generated_at).toLocaleString()} • lookback {forecast.lookback_days} days
             </div>
           </div>
         ) : (
           <div className="empty-state">Generate a forecast to see results.</div>
-        )}
-      </section>
+          )}
+        </section>
 
-      <section className="card">
+        <section className="card">
         <h2>History</h2>
-        {loading && <div className="loading">Loading...</div>}
-        {!loading && history.length > 0 && (
-          <div className="table-container">
-            <table className="history-table">
-              <thead>
-                <tr>
-                  <th>City</th>
-                  <th>Timestamp</th>
-                  <th>Temp (°C)</th>
-                  <th>Humidity (%)</th>
-                  <th>Wind (km/h)</th>
-                  <th>Conditions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((record, idx) => (
-                  <tr key={`${record.timestamp}-${idx}`}>
-                    <td>{record.city}</td>
-                    <td>{new Date(record.timestamp).toLocaleString()}</td>
-                    <td>{formatValue(record.tempC)}</td>
-                    <td>{formatValue(record.humidity)}</td>
-                    <td>{formatValue(record.windKph)}</td>
-                    <td>{record.conditions}</td>
+          {loading && <div className="loading">Loading...</div>}
+          {!loading && history.length > 0 && (
+            <div className="table-container">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>City</th>
+                    <th>Timestamp</th>
+                    <th>Temp (°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Wind (km/h)</th>
+                    <th>Conditions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {!loading && history.length === 0 && (
+                </thead>
+                <tbody>
+                  {history.map((record, idx) => (
+                    <tr key={`${record.timestamp}-${idx}`}>
+                      <td>{record.city}</td>
+                      <td>{new Date(record.timestamp).toLocaleString()}</td>
+                      <td>{formatValue(record.tempC)}</td>
+                      <td>{formatValue(record.humidity)}</td>
+                      <td>{formatValue(record.windKph)}</td>
+                      <td>{record.conditions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loading && history.length === 0 && (
           <div className="empty-state">No stored records for this filter.</div>
-        )}
-      </section>
+          )}
+        </section>
     </div>
   );
 }
