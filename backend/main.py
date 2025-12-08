@@ -1,15 +1,14 @@
 """
-Weather Data Analytics Backend
-FastAPI server with HDFS storage support using Open-Meteo APIs
+Weather Data Analytics Backend (offline-first)
+Serves data from local storage/HDFS without calling external weather APIs.
 """
 from datetime import datetime, timedelta, date
 from statistics import mean
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import requests
 
 from storage import get_storage_adapter
 
@@ -24,219 +23,68 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/era5"
-GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-
 # Initialize storage adapter (HDFS or local fallback)
 storage = get_storage_adapter()
-
-WEATHER_CODE_MAP = {
-    0: "clear sky",
-    1: "mainly clear",
-    2: "partly cloudy",
-    3: "overcast",
-    45: "fog",
-    48: "depositing rime fog",
-    51: "light drizzle",
-    53: "moderate drizzle",
-    55: "dense drizzle",
-    56: "freezing drizzle",
-    57: "dense freezing drizzle",
-    61: "slight rain",
-    63: "moderate rain",
-    65: "heavy rain",
-    66: "light freezing rain",
-    67: "heavy freezing rain",
-    71: "slight snowfall",
-    73: "moderate snowfall",
-    75: "heavy snowfall",
-    77: "snow grains",
-    80: "slight rain showers",
-    81: "moderate rain showers",
-    82: "violent rain showers",
-    85: "slight snow showers",
-    86: "heavy snow showers",
-    95: "thunderstorm",
-    96: "thunderstorm with slight hail",
-    99: "thunderstorm with heavy hail",
-}
 
 
 # Data Models
 class WeatherRecord(BaseModel):
     city: str
     timestamp: str  # ISO format
-    tempC: float
-    humidity: float
-    windKph: float
-    conditions: str
+    tempC: Optional[float] = None
+    humidity: Optional[float] = None
+    windKph: Optional[float] = None
+    conditions: Optional[str] = None
 
 
 class IngestRequest(BaseModel):
     records: List[WeatherRecord]
 
 
-def geocode_city(city: str) -> Tuple[float, float, str]:
-    """Lookup latitude/longitude for a city using Open-Meteo geocoding API"""
+def _parse_timestamp(ts: str) -> Optional[datetime]:
+    """Parse ISO timestamps while tolerating missing timezone suffixes."""
     try:
-        response = requests.get(
-            GEOCODE_URL,
-            params={"name": city, "count": 1, "language": "en", "format": "json"},
-            timeout=10,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=503, detail=f"Geocoding service error: {exc}")
-
-    payload = response.json()
-    results = payload.get("results", [])
-    if not results:
-        raise HTTPException(status_code=404, detail=f"City '{city}' not found")
-
-    location = results[0]
-    latitude = location.get("latitude")
-    longitude = location.get("longitude")
-    resolved_name = location.get("name", city)
-
-    if latitude is None or longitude is None:
-        raise HTTPException(status_code=404, detail=f"City '{city}' not found")
-
-    return float(latitude), float(longitude), resolved_name
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
-def describe_weather_code(code: Optional[int]) -> str:
-    if code is None:
-        return "unknown conditions"
-    return WEATHER_CODE_MAP.get(code, f"weather code {code}")
+def _filter_by_range(
+    records: List[Dict[str, Any]],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Filter records by optional inclusive start/end dates (YYYY-MM-DD)."""
+    if not start_date and not end_date:
+        return records
+
+    start_dt = datetime.fromisoformat(start_date) if start_date else None
+    end_dt = datetime.fromisoformat(end_date) + timedelta(days=1) if end_date else None
+
+    filtered: List[Dict[str, Any]] = []
+    for rec in records:
+        ts = rec.get("timestamp")
+        parsed = _parse_timestamp(ts) if isinstance(ts, str) else None
+        if not parsed:
+            continue
+        if start_dt and parsed < start_dt:
+            continue
+        if end_dt and parsed >= end_dt:
+            continue
+        filtered.append(rec)
+    return filtered
 
 
-def build_record(
-    city: str,
-    timestamp: str,
-    temperature: Optional[float],
-    humidity: Optional[float],
-    wind: Optional[float],
-    conditions: str,
-) -> Dict[str, Any]:
-    """Create a record dictionary in the storage format"""
-    return {
-        "city": city.lower(),
-        "timestamp": timestamp,
-        "tempC": round(temperature, 2) if temperature is not None else None,
-        "humidity": round(humidity, 2) if humidity is not None else None,
-        "windKph": round(wind, 2) if wind is not None else None,
-        "conditions": conditions,
-    }
-
-
-def fetch_current_weather(city: str) -> Dict[str, Any]:
-    latitude, longitude, resolved_name = geocode_city(city)
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "current": "temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code",
-    }
-
-    try:
-        response = requests.get(FORECAST_URL, params=params, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=503, detail=f"Forecast service error: {exc}")
-
-    current = response.json().get("current", {})
-    return build_record(
-        resolved_name,
-        current.get("time", datetime.utcnow().isoformat()),
-        current.get("temperature_2m"),
-        current.get("relative_humidity_2m"),
-        current.get("wind_speed_10m"),
-        describe_weather_code(current.get("weather_code")),
-    )
-
-
-def fetch_past_weather(city: str, days: int) -> List[Dict[str, Any]]:
-    latitude, longitude, resolved_name = geocode_city(city)
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "past_days": max(1, min(days, 92)),
-        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
-    }
-
-    try:
-        response = requests.get(FORECAST_URL, params=params, timeout=20)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=503, detail=f"Past weather service error: {exc}")
-
-    payload = response.json()
-    hourly = payload.get("hourly", {})
-    times = hourly.get("time", [])
-    temps = hourly.get("temperature_2m", [])
-    humidity = hourly.get("relative_humidity_2m", [])
-    wind = hourly.get("wind_speed_10m", [])
-    codes = hourly.get("weather_code", [])
-
-    records: List[Dict[str, Any]] = []
-    for idx, timestamp in enumerate(times):
-        temp = temps[idx] if idx < len(temps) else None
-        hum = humidity[idx] if idx < len(humidity) else None
-        wind_speed = wind[idx] if idx < len(wind) else None
-        code = codes[idx] if idx < len(codes) else None
-        records.append(
-            build_record(
-                resolved_name,
-                timestamp,
-                temp,
-                hum,
-                wind_speed,
-                describe_weather_code(code),
-            )
-        )
-    return records
-
-
-def fetch_historical_weather(city: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
-    latitude, longitude, resolved_name = geocode_city(city)
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "start_date": start_date,
-        "end_date": end_date,
-        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
-    }
-
-    try:
-        response = requests.get(HISTORICAL_URL, params=params, timeout=20)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(
-            status_code=503, detail=f"Historical weather service error: {exc}"
-        )
-
-    payload = response.json()
-    hourly = payload.get("hourly", {})
-    times = hourly.get("time", [])
-    temps = hourly.get("temperature_2m", [])
-    humidity = hourly.get("relative_humidity_2m", [])
-    wind = hourly.get("wind_speed_10m", [])
-
-    records: List[Dict[str, Any]] = []
-    for idx, timestamp in enumerate(times):
-        temp = temps[idx] if idx < len(temps) else None
-        hum = humidity[idx] if idx < len(humidity) else None
-        wind_speed = wind[idx] if idx < len(wind) else None
-        records.append(
-            build_record(
-                resolved_name,
-                timestamp,
-                temp,
-                hum,
-                wind_speed,
-                "historical (ERA5)",
-            )
-        )
+def _read_records(
+    city: Optional[str],
+    days: Optional[int] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Centralized record retrieval with optional city/days/date-range filtering."""
+    since = datetime.now() - timedelta(days=days) if days else None
+    records = storage.read_records(city=city, since=since)
+    records = _filter_by_range(records, start_date=start, end_date=end)
     return records
 
 
@@ -248,6 +96,14 @@ async def health():
         "storage": storage.get_storage_type(),
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@app.get("/cities")
+async def list_cities():
+    """Return unique city names from stored records."""
+    records = storage.read_records(city=None, since=None)
+    cities = sorted({str(rec.get("city", "")).lower() for rec in records if rec.get("city")})
+    return {"count": len(cities), "cities": cities}
 
 
 @app.post("/ingest")
@@ -281,24 +137,29 @@ async def get_weather(
         description="Retrieval mode: current, past, historical",
         regex="^(current|past|historical)$",
     ),
-    days: int = Query(10, description="Past days (mode=past, max 92)"),
+    days: int = Query(365, description="Past days (mode=past)"),
     start: Optional[str] = Query(None, description="Start date YYYY-MM-DD (historical)"),
     end: Optional[str] = Query(None, description="End date YYYY-MM-DD (historical)"),
 ):
     """
-    Retrieve weather data from Open-Meteo APIs and store results.
+    Retrieve weather data from locally stored records (no external API calls).
+    - current: returns the most recent stored record for the city
+    - past: returns records within the last N days
+    - historical: returns records within an explicit date range
     """
     try:
         if mode == "current":
-            record = fetch_current_weather(city)
-            storage.write_record(record)
-            return {"city": record["city"], "record": record, "mode": "current"}
+            records = _read_records(city=city, days=None)
+            if not records:
+                raise HTTPException(status_code=404, detail="No stored records for this city")
+            latest = sorted(records, key=lambda x: x.get("timestamp", ""), reverse=True)[0]
+            return {"city": city.lower(), "record": latest, "mode": "current"}
 
         if mode == "past":
-            records = fetch_past_weather(city, days)
-            for record in records:
-                storage.write_record(record)
-            return {"city": city.lower(), "stored": len(records), "mode": "past"}
+            records = _read_records(city=city, days=max(1, days))
+            if not records:
+                raise HTTPException(status_code=404, detail="No stored records for requested window")
+            return {"city": city.lower(), "stored": len(records), "mode": "past", "records": records}
 
         if mode == "historical":
             if not start or not end:
@@ -306,15 +167,16 @@ async def get_weather(
                     status_code=400,
                     detail="Start and end dates are required for historical mode",
                 )
-            records = fetch_historical_weather(city, start, end)
-            for record in records:
-                storage.write_record(record)
+            records = _read_records(city=city, start=start, end=end)
+            if not records:
+                raise HTTPException(status_code=404, detail="No stored records in this date range")
             return {
                 "city": city.lower(),
                 "stored": len(records),
                 "mode": "historical",
                 "start": start,
                 "end": end,
+                "records": records,
             }
 
         raise HTTPException(status_code=400, detail="Unsupported mode")
@@ -327,14 +189,15 @@ async def get_weather(
 @app.get("/stats")
 async def get_stats(
     city: Optional[str] = Query(None, description="Filter by city"),
-    days: int = Query(7, description="Number of days to analyze"),
+    days: Optional[int] = Query(365, description="Number of days to analyze; omit for all"),
+    start: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
 ):
     """
     Get statistics (averages, min, max) for stored records.
     """
     try:
-        start_date = datetime.now() - timedelta(days=days)
-        records = storage.read_records(city=city, since=start_date)
+        records = _read_records(city=city, days=days, start=start, end=end)
 
         if not records:
             return {
@@ -372,14 +235,15 @@ async def get_stats(
 @app.get("/history")
 async def get_history(
     city: Optional[str] = Query(None, description="Filter by city"),
-    days: int = Query(7, description="Number of days of history"),
+    days: Optional[int] = Query(365, description="Number of days of history; omit for all"),
+    start: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
 ):
     """
     Get stored weather records.
     """
     try:
-        start_date = datetime.now() - timedelta(days=days)
-        records = storage.read_records(city=city, since=start_date)
+        records = _read_records(city=city, days=days, start=start, end=end)
         records.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
         return {
@@ -393,10 +257,8 @@ async def get_history(
 
 
 def _parse_iso_date(ts: str) -> Optional[date]:
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
-    except Exception:
-        return None
+    parsed = _parse_timestamp(ts)
+    return parsed.date() if parsed else None
 
 
 def _linear_forecast(values: List[float], periods: int) -> List[float]:
@@ -411,10 +273,7 @@ def _linear_forecast(values: List[float], periods: int) -> List[float]:
     mean_x = sum(xs) / len(xs)
     mean_y = sum(values) / len(values)
     denom = sum((x - mean_x) ** 2 for x in xs)
-    if denom == 0:
-        slope = 0.0
-    else:
-        slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, values)) / denom
+    slope = 0.0 if denom == 0 else sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, values)) / denom
     intercept = mean_y - slope * mean_x
 
     forecasts: List[float] = []
@@ -425,8 +284,7 @@ def _linear_forecast(values: List[float], periods: int) -> List[float]:
 
 
 def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
-    since = datetime.now() - timedelta(days=max(lookback, days) + 5)
-    records = storage.read_records(city=city, since=since)
+    records = storage.read_records(city=city, since=None)
     if not records:
         raise HTTPException(status_code=404, detail="No stored data available for forecast")
 
@@ -465,7 +323,6 @@ def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
     if len(temp_series) < 2 and len(humid_series) < 2 and len(wind_series) < 2:
         raise HTTPException(status_code=400, detail="Need at least two days of data for forecasting")
 
-    # Forecast always starts from tomorrow (today + 1)
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     future_dates = [tomorrow + timedelta(days=i) for i in range(days)]
@@ -497,16 +354,12 @@ def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
 @app.get("/forecast")
 async def get_forecast(
     city: str = Query(..., description="City to forecast"),
-    days: int = Query(7, description="Days ahead to forecast (2-7)"),
-    lookback: int = Query(14, description="Lookback days to learn from"),
+    days: int = Query(5, description="Days ahead to forecast (2-7)", ge=2, le=7),
+    lookback: int = Query(30, description="Lookback days to learn from", ge=3),
 ):
     """
     Predict upcoming days using simple linear regression on stored records.
     """
-    if days < 2 or days > 7:
-        raise HTTPException(status_code=400, detail="Days must be between 2 and 7")
-    if lookback < 3:
-        raise HTTPException(status_code=400, detail="Lookback should be at least 3 days")
     try:
         return generate_forecast(city, days, lookback)
     except HTTPException:

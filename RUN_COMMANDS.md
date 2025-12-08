@@ -28,8 +28,9 @@ docker-compose logs -f
 ```
 
 ### Access Points:
-- **Frontend**: http://localhost:5000
-- **Backend API**: http://localhost:5000/api
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:5000
+- **API Docs**: http://localhost:5000/docs
 - **Hadoop NameNode UI**: http://localhost:9870
 - **Hadoop DataNode UI**: http://localhost:9864
 
@@ -57,7 +58,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # Install frontend dependencies
 cd frontend
@@ -85,26 +86,11 @@ cd frontend
 npm start
 ```
 
+
 ### Access Points:
 - **Frontend**: http://localhost:3000 (automatically opens in browser)
 - **Backend API**: http://localhost:5000
 - **Backend API Docs**: http://localhost:5000/docs (Swagger UI)
-
----
-
-## Quick Start Scripts
-
-You can also use the provided PowerShell scripts:
-
-**Backend:**
-```powershell
-.\start-backend.ps1
-```
-
-**Frontend:**
-```powershell
-.\start-frontend.ps1
-```
 
 ---
 

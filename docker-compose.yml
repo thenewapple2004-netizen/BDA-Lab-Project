@@ -40,28 +40,40 @@ services:
   # Backend Service - FastAPI (processes data on startup)
   backend:
     build:
-      context: .
-      dockerfile: ./Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: weather-backend
     hostname: backend
     ports:
-      - "5000:5000"   # Backend API + Frontend
+      - "5000:5000"   # Backend API
     volumes:
       - ./data:/app/data  # Mount data directory for reading/writing
     environment:
       - DATA_DIR=/app/data
+      - HDFS_NAMENODE=http://namenode:9870
+      - HDFS_USER=hadoop
+      - HDFS_BASE_DIR=/apps/weather
     depends_on:
       - namenode
       - datanode
     networks:
       - bigdata-network
-    command: >
-      sh -c "
-        echo 'Waiting for Hadoop to initialize...' &&
-        sleep 20 &&
-        echo 'Starting backend server (data processing happens on startup)...' &&
-        python /app/main.py
-      "
+
+  # Frontend Service - React UI
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: weather-frontend
+    hostname: frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - bigdata-network
 
 volumes:
   hadoop_namenode:
