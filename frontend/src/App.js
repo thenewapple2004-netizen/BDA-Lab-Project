@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
 import {
@@ -34,9 +34,20 @@ function App() {
 
   useEffect(() => {
     loadHealth();
-    loadCities();
-    refreshData();
   }, []);
+
+  useEffect(() => {
+    const init = async () => {
+      await loadCities();
+    };
+    init();
+  }, [loadCities]);
+
+  useEffect(() => {
+    if (city !== undefined) {
+      refreshData();
+    }
+  }, [city, refreshData]);
 
   const setStatus = (msg, err = null) => {
     setMessage(msg);
@@ -59,7 +70,7 @@ function App() {
     }
   };
 
-  const loadCities = async () => {
+  const loadCities = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/cities`);
       setCities(res.data.cities || []);
@@ -69,9 +80,9 @@ function App() {
     } catch {
       // keep silent; city list is optional
     }
-  };
+  }, [city]);
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     setStatus(null, null);
     setLoading(true);
     try {
@@ -83,9 +94,9 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setStatus(null, null);
     setLoading(true);
     try {
@@ -97,9 +108,9 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadLatest = async () => {
+  const loadLatest = useCallback(async () => {
     if (!city) return;
     setStatus(null, null);
     setLoading(true);
@@ -115,9 +126,9 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [city]);
 
-  const loadForecast = async () => {
+  const loadForecast = useCallback(async () => {
     if (!city) {
       setStatus(null, 'Select a city to forecast.');
       return;
@@ -135,13 +146,13 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [city, forecastDays, lookback]);
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     await loadHistory();
     await loadStats();
     await loadLatest();
-  };
+  }, [loadHistory, loadLatest, loadStats]);
 
   const chartData = useMemo(() => {
     const sorted = [...history].sort(
