@@ -14,7 +14,14 @@ import './index.css';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
+const getApiBase = () => {
+  if (process.env.REACT_APP_API_BASE) return process.env.REACT_APP_API_BASE;
+  const { protocol, hostname } = window.location;
+  // default to backend exposed on port 5000 on the same host
+  return `${protocol}//${hostname}:5000`;
+};
+
+const API_BASE = getApiBase();
 
 function App() {
   const [city, setCity] = useState('');
