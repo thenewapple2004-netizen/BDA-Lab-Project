@@ -192,7 +192,7 @@ class LocalAdapter(StorageAdapter):
     def read_records(self, city: Optional[str] = None, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """Read records from local filesystem, scanning date partitions"""
         records = []
-        base_partition = os.path.join(self.base_dir, "apps", "weather", "ingest")
+        base_partition = os.path.join(self.base_dir, "apps", "weather", "ingest") 
         
         if not os.path.exists(base_partition):
             return []
