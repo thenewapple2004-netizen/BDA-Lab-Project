@@ -38,56 +38,39 @@ function App() {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [storageType, setStorageType] = useState('unknown');
-
-  useEffect(() => {
-    loadHealth();
-  }, []);
-
-  useEffect(() => {
-    const init = async () => {
-      await loadCities();
-    };
-    init();
-  }, [loadCities]);
-
-  useEffect(() => {
-    if (city !== undefined) {
-      refreshData();
-    }
-  }, [city, refreshData]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [recordsPerPage, setRecordsPerPage] = useState(10);
 
   const setStatus = (msg, err = null) => {
     setMessage(msg);
     setError(err);
   };
 
-  const buildParams = () => {
+  const buildParams = useCallback(() => {
     const params = { city: city || undefined, days: 365 };
     if (startDate) params.start = startDate;
     if (endDate) params.end = endDate;
     return params;
-  };
+  }, [city, startDate, endDate]);
 
-  const loadHealth = async () => {
+  const loadHealth = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/health`);
       setStorageType(res.data.storage);
     } catch {
       setStorageType('unavailable');
     }
-  };
+  }, []);
 
   const loadCities = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/cities`);
-      setCities(res.data.cities || []);
-      if (!city && res.data.cities?.length) {
-        setCity(res.data.cities[0]);
-      }
+      const cityList = res.data.cities || [];
+      setCities(cityList);
     } catch {
       // keep silent; city list is optional
     }
-  }, [city]);
+  }, []);
 
   const loadHistory = useCallback(async () => {
     setStatus(null, null);
@@ -101,7 +84,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [buildParams]);
 
   const loadStats = useCallback(async () => {
     setStatus(null, null);
@@ -115,7 +98,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [buildParams]);
 
   const loadLatest = useCallback(async () => {
     if (!city) return;
@@ -161,11 +144,46 @@ function App() {
     await loadLatest();
   }, [loadHistory, loadLatest, loadStats]);
 
+  useEffect(() => {
+    loadHealth();
+  }, [loadHealth]);
+
+  useEffect(() => {
+    loadCities();
+  }, [loadCities]);
+
+  // Set initial city when cities are loaded
+  useEffect(() => {
+    if (!city && cities.length > 0) {
+      setCity(cities[0]);
+    }
+  }, [cities, city]);
+
+  useEffect(() => {
+    if (city !== undefined && city !== '') {
+      refreshData();
+      setCurrentPage(1); // Reset to first page when city changes
+    }
+  }, [city, refreshData]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(history.length / recordsPerPage);
+  const startIndex = (currentPage - 1) * recordsPerPage;
+  const endIndex = startIndex + recordsPerPage;
+  const paginatedHistory = history.slice(startIndex, endIndex);
+
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const chartData = useMemo(() => {
     const sorted = [...history].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
-    const labels = sorted.map((r) => new Date(r.timestamp).toLocaleString());
+    const labels = sorted.map((r) => formatTimestamp(r.timestamp));
     return {
       labels,
       temp: sorted.map((r) => r.tempC ?? null),
@@ -282,7 +300,7 @@ function App() {
           {latest ? (
             <div className="record-preview">
               <p><strong>City:</strong> {latest.city}</p>
-              <p><strong>Timestamp:</strong> {new Date(latest.timestamp).toLocaleString()}</p>
+              <p><strong>Timestamp:</strong> {formatTimestamp(latest.timestamp)}</p>
               <p><strong>Temp:</strong> {formatValue(latest.tempC)} °C</p>
               <p><strong>Humidity:</strong> {formatValue(latest.humidity)} %</p>
               <p><strong>Wind:</strong> {formatValue(latest.windKph)} km/h</p>
@@ -360,32 +378,95 @@ function App() {
         <h2>History</h2>
           {loading && <div className="loading">Loading...</div>}
           {!loading && history.length > 0 && (
-            <div className="table-container">
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>City</th>
-                    <th>Timestamp</th>
-                    <th>Temp (°C)</th>
-                    <th>Humidity (%)</th>
-                    <th>Wind (km/h)</th>
-                    <th>Conditions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((record, idx) => (
-                    <tr key={`${record.timestamp}-${idx}`}>
-                      <td>{record.city}</td>
-                      <td>{new Date(record.timestamp).toLocaleString()}</td>
-                      <td>{formatValue(record.tempC)}</td>
-                      <td>{formatValue(record.humidity)}</td>
-                      <td>{formatValue(record.windKph)}</td>
-                      <td>{record.conditions}</td>
+            <>
+              <div className="pagination-controls-top">
+                <div className="pagination-info">
+                  Showing {startIndex + 1}-{Math.min(endIndex, history.length)} of {history.length} records
+                </div>
+                <div className="records-per-page">
+                  <label>Records per page: </label>
+                  <select
+                    value={recordsPerPage}
+                    onChange={(e) => {
+                      setRecordsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+              <div className="table-container">
+                <table className="history-table">
+                  <thead>
+                    <tr>
+                      <th>City</th>
+                      <th>Timestamp</th>
+                      <th>Temp (°C)</th>
+                      <th>Humidity (%)</th>
+                      <th>Wind (km/h)</th>
+                      <th>Conditions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedHistory.map((record, idx) => (
+                      <tr key={`${record.timestamp}-${idx}`}>
+                        <td>{record.city}</td>
+                        <td>{formatTimestamp(record.timestamp)}</td>
+                        <td>{formatValue(record.tempC)}</td>
+                        <td>{formatValue(record.humidity)}</td>
+                        <td>{formatValue(record.windKph)}</td>
+                        <td>{record.conditions}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {totalPages > 1 && (
+                <div className="pagination-controls">
+                  <button
+                    className="btn pagination-btn"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </button>
+                  <div className="pagination-numbers">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                      // Show first page, last page, current page, and pages around current
+                      if (
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 1 && page <= currentPage + 1)
+                      ) {
+                        return (
+                          <button
+                            key={page}
+                            className={`btn pagination-number ${currentPage === page ? 'active' : ''}`}
+                            onClick={() => handlePageChange(page)}
+                          >
+                            {page}
+                          </button>
+                        );
+                      } else if (page === currentPage - 2 || page === currentPage + 2) {
+                        return <span key={page} className="pagination-ellipsis">...</span>;
+                      }
+                      return null;
+                    })}
+                  </div>
+                  <button
+                    className="btn pagination-btn"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {!loading && history.length === 0 && (
           <div className="empty-state">No stored records for this filter.</div>
@@ -410,6 +491,32 @@ const formatValue = (value) => {
     return Number.isInteger(value) ? value : value.toFixed(1);
   }
   return value;
+};
+
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return 'N/A';
+  try {
+    // Handle ISO format without timezone (e.g., "2025-11-17T23:00")
+    let dateStr = timestamp;
+    if (typeof timestamp === 'string' && timestamp.includes('T') && !timestamp.includes('Z') && !timestamp.includes('+')) {
+      // Add timezone if missing to ensure proper parsing
+      dateStr = timestamp + (timestamp.includes(':') && timestamp.split(':').length === 2 ? ':00' : '');
+    }
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      return timestamp; // Return original if parsing fails
+    }
+    // Format as: DD/MM/YYYY, HH:MM:SS
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${day}/${month}/${year}, ${hours}:${minutes}:${seconds}`;
+  } catch (e) {
+    return timestamp; // Return original on error
+  }
 };
 
 export default App;

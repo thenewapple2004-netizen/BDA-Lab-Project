@@ -34,6 +34,16 @@ class StorageAdapter(ABC):
     def get_storage_type(self) -> str:
         """Return storage type identifier"""
         pass
+    
+    @abstractmethod
+    def list_cities(self) -> List[str]:
+        """List all unique city names from available data files"""
+        pass
+    
+    @abstractmethod
+    def list_cities(self) -> List[str]:
+        """List all unique city names from available data files"""
+        pass
 
 
 class HDFSAdapter(StorageAdapter):
@@ -150,6 +160,63 @@ class HDFSAdapter(StorageAdapter):
         
         return records
     
+    def list_cities(self) -> List[str]:
+        """List all unique city names from HDFS filenames, with fallback to local filesystem"""
+        cities = set()
+        base_partition = "ingest"
+        
+        # Try HDFS first
+        try:
+            if self.client.status(base_partition, strict=False):
+                partitions = []
+                try:
+                    for item in self.client.list(base_partition):
+                        if item.startswith("date="):
+                            partitions.append(f"{base_partition}/{item}")
+                except Exception:
+                    pass
+                
+                for partition in partitions:
+                    try:
+                        files = self.client.list(partition)
+                        for filename in files:
+                            if filename.endswith(".jsonl"):
+                                city = filename.replace(".jsonl", "").lower()
+                                if city:
+                                    cities.add(city)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        
+        # Always check local filesystem as fallback (HDFS might not have all data)
+        # This ensures we get all cities from the mounted data directory
+        # Try multiple possible local paths
+        possible_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"),
+            os.getenv("DATA_DIR", "/app/data"),
+            "/app/data",  # Docker mount point
+        ]
+        for local_dir in possible_paths:
+            local_base = os.path.join(local_dir, "apps", "weather", "ingest")
+            if os.path.exists(local_base):
+                try:
+                    for item in os.listdir(local_base):
+                        if item.startswith("date="):
+                            partition = os.path.join(local_base, item)
+                            if os.path.isdir(partition):
+                                for filename in os.listdir(partition):
+                                    if filename.endswith(".jsonl"):
+                                        city = filename.replace(".jsonl", "").lower()
+                                        if city:
+                                            cities.add(city)
+                except Exception:
+                    continue
+                if cities:  # If we found cities, stop trying other paths
+                    break
+        
+        return sorted(list(cities))
+    
     def get_storage_type(self) -> str:
         return "hdfs"
 
@@ -246,6 +313,37 @@ class LocalAdapter(StorageAdapter):
         
         return records
     
+    def list_cities(self) -> List[str]:
+        """List all unique city names from local filesystem filenames"""
+        cities = set()
+        base_partition = os.path.join(self.base_dir, "apps", "weather", "ingest")
+        
+        if not os.path.exists(base_partition):
+            return []
+        
+        partitions = []
+        try:
+            for item in os.listdir(base_partition):
+                if item.startswith("date="):
+                    partitions.append(os.path.join(base_partition, item))
+        except Exception:
+            pass
+        
+        for partition in partitions:
+            try:
+                if not os.path.isdir(partition):
+                    continue
+                
+                for filename in os.listdir(partition):
+                    if filename.endswith(".jsonl"):
+                        city = filename.replace(".jsonl", "").lower()
+                        if city:
+                            cities.add(city)
+            except Exception:
+                continue
+        
+        return sorted(list(cities))
+    
     def get_storage_type(self) -> str:
         return "local"
 
@@ -257,7 +355,8 @@ def get_storage_adapter() -> StorageAdapter:
     """
     # Try HDFS configuration
     namenode = os.getenv("HDFS_NAMENODE", "http://localhost:9870")
-    hdfs_user = os.getenv("HDFS_USER", os.getlogin() if hasattr(os, "getlogin") else "hadoop")
+    # Avoid os.getlogin() in containers without a TTY; default to "hadoop".
+    hdfs_user = os.getenv("HDFS_USER") or "hadoop"
     hdfs_base = os.getenv("HDFS_BASE_DIR", "/apps/weather")
     
     if HDFS_AVAILABLE:

@@ -43,8 +43,17 @@ class IngestRequest(BaseModel):
 
 def _parse_timestamp(ts: str) -> Optional[datetime]:
     """Parse ISO timestamps while tolerating missing timezone suffixes."""
+    if not ts or not isinstance(ts, str):
+        return None
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        # Handle formats like "2025-11-17T23:00" (no timezone)
+        if "T" in ts and "+" not in ts and "Z" not in ts:
+            return datetime.fromisoformat(ts)
+        # Handle UTC with Z
+        if ts.endswith("Z"):
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        # Standard ISO format
+        return datetime.fromisoformat(ts)
     except Exception:
         return None
 
@@ -56,7 +65,7 @@ def _filter_by_range(
 ) -> List[Dict[str, Any]]:
     """Filter records by optional inclusive start/end dates (YYYY-MM-DD)."""
     if not start_date and not end_date:
-    return records
+        return records
 
     start_dt = datetime.fromisoformat(start_date) if start_date else None
     end_dt = datetime.fromisoformat(end_date) + timedelta(days=1) if end_date else None
@@ -100,9 +109,8 @@ async def health():
 
 @app.get("/cities")
 async def list_cities():
-    """Return unique city names from stored records."""
-    records = storage.read_records(city=None, since=None)
-    cities = sorted({str(rec.get("city", "")).lower() for rec in records if rec.get("city")})
+    """Return unique city names from available data files."""
+    cities = storage.list_cities()
     return {"count": len(cities), "cities": cities}
 
 
@@ -152,7 +160,12 @@ async def get_weather(
             records = _read_records(city=city, days=None)
             if not records:
                 raise HTTPException(status_code=404, detail="No stored records for this city")
-            latest = sorted(records, key=lambda x: x.get("timestamp", ""), reverse=True)[0]
+            # Sort by parsed timestamp to ensure correct chronological order
+            latest = sorted(
+                records,
+                key=lambda x: _parse_timestamp(x.get("timestamp", "")) or datetime.min,
+                reverse=True
+            )[0]
             return {"city": city.lower(), "record": latest, "mode": "current"}
 
         if mode == "past":
@@ -261,26 +274,16 @@ def _parse_iso_date(ts: str) -> Optional[date]:
     return parsed.date() if parsed else None
 
 
-def _linear_forecast(values: List[float], periods: int) -> List[float]:
-    """Simple linear regression extrapolation."""
+def _average_forecast(values: List[float], periods: int) -> List[float]:
+    """Simple average-based prediction using historical average."""
     if not values:
         return [None] * periods
 
-    if len(values) == 1:
-        return [round(values[0], 2)] * periods
-
-    xs = list(range(len(values)))
-    mean_x = sum(xs) / len(xs)
-    mean_y = sum(values) / len(values)
-    denom = sum((x - mean_x) ** 2 for x in xs)
-    slope = 0.0 if denom == 0 else sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, values)) / denom
-    intercept = mean_y - slope * mean_x
-
-    forecasts: List[float] = []
-    for idx in range(len(values), len(values) + periods):
-        value = intercept + slope * idx
-        forecasts.append(round(value, 2))
-    return forecasts
+    # Calculate average of all historical values
+    avg_value = sum(values) / len(values)
+    
+    # Return the same average for all forecast periods
+    return [round(avg_value, 2)] * periods
 
 
 def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
@@ -320,16 +323,16 @@ def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
         if entry["wind"]:
             wind_series.append(round(mean(entry["wind"]), 2))
 
-    if len(temp_series) < 2 and len(humid_series) < 2 and len(wind_series) < 2:
-        raise HTTPException(status_code=400, detail="Need at least two days of data for forecasting")
+    if len(temp_series) < 1 and len(humid_series) < 1 and len(wind_series) < 1:
+        raise HTTPException(status_code=400, detail="Need at least one day of data for prediction")
 
     today = datetime.now().date()
     tomorrow = today + timedelta(days=1)
     future_dates = [tomorrow + timedelta(days=i) for i in range(days)]
 
-    temp_forecast = _linear_forecast(temp_series, days) if temp_series else [None] * days
-    humid_forecast = _linear_forecast(humid_series, days) if humid_series else [None] * days
-    wind_forecast = _linear_forecast(wind_series, days) if wind_series else [None] * days
+    temp_forecast = _average_forecast(temp_series, days) if temp_series else [None] * days
+    humid_forecast = _average_forecast(humid_series, days) if humid_series else [None] * days
+    wind_forecast = _average_forecast(wind_series, days) if wind_series else [None] * days
 
     forecast = []
     for idx, day_date in enumerate(future_dates):
@@ -355,10 +358,11 @@ def generate_forecast(city: str, days: int, lookback: int) -> Dict[str, Any]:
 async def get_forecast(
     city: str = Query(..., description="City to forecast"),
     days: int = Query(5, description="Days ahead to forecast (2-7)", ge=2, le=7),
-    lookback: int = Query(30, description="Lookback days to learn from", ge=3),
+    lookback: int = Query(30, description="Number of historical days to use for calculation", ge=3),
 ):
     """
-    Predict upcoming days using simple linear regression on stored records.
+    Predict upcoming days using average-based calculation from stored records.
+    Uses historical average values for prediction.
     """
     try:
         return generate_forecast(city, days, lookback)

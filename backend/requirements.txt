@@ -3,4 +3,3 @@ uvicorn[standard]>=0.24.0
 pydantic>=2.9.0
 hdfs==2.7.3
 python-multipart>=0.0.6
-

@@ -68,8 +68,6 @@ services:
     hostname: frontend
     ports:
       - "3000:3000"
-    environment:
-      - REACT_APP_API_BASE=http://backend:5000
     depends_on:
       - backend
     networks:
